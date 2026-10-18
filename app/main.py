@@ -1,5 +1,8 @@
 """API FastAPI: upload PDF, list/hapus dokumen, tanya jawab."""
+import json
 import shutil
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -15,6 +18,29 @@ from .store import VectorStore
 
 STATIC = Path(__file__).parent / "static"
 store: VectorStore | None = None
+
+# Cache saran pertanyaan per dokumen: {nama: {"questions": [...], "at": epoch}}.
+# Membuat saran butuh ~10 detik di LLM lokal, jadi cukup sekali per dokumen.
+SUGGEST_FILE = Path(UPLOAD_DIR).parent / "suggestions.json"
+_suggest_lock = threading.Lock()
+
+
+def _read_cache() -> dict:
+    try:
+        return json.loads(SUGGEST_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _update_cache(name: str, entry: dict | None) -> None:
+    """Simpan (entry) atau hapus (None) cache satu dokumen."""
+    with _suggest_lock:
+        cache = _read_cache()
+        if entry is None:
+            cache.pop(name, None)
+        else:
+            cache[name] = entry
+        SUGGEST_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 @asynccontextmanager
@@ -56,6 +82,7 @@ def upload(file: UploadFile = File(...)):
             422, "Tidak ada teks yang bisa diekstrak. PDF hasil scan perlu OCR dulu."
         )
     n = store.add_document(name, chunks)
+    _update_cache(name, None)  # isi berubah, saran lama tidak berlaku
     return {"name": name, "chunks": n, "pages": len({c["page"] for c in chunks})}
 
 
@@ -64,15 +91,27 @@ def list_documents():
     return store.list_documents()
 
 
+@app.get("/suggestions")
+def cached_suggestions():
+    """Semua saran yang sudah tersimpan, tanpa memanggil LLM."""
+    return _read_cache()
+
+
 @app.get("/documents/{name}/suggestions")
-def suggestions(name: str):
+def suggestions(name: str, refresh: bool = False):
+    if not refresh and (hit := _read_cache().get(name)):
+        return {**hit, "cached": True}
     passages = store.sample(name)
     if not passages:
         raise HTTPException(404, "Dokumen tidak ditemukan.")
     try:
-        return {"questions": llm.suggest(passages)}
+        questions = llm.suggest(passages)
     except Exception as e:
         raise HTTPException(502, f"Gagal memanggil LLM: {e}")
+    entry = {"questions": questions, "at": time.time()}
+    if questions:  # jangan cache hasil kosong, biar bisa dicoba lagi
+        _update_cache(name, entry)
+    return {**entry, "cached": False}
 
 
 @app.get("/stats")
@@ -94,6 +133,7 @@ def stats():
 def delete_document(name: str):
     store.delete_document(name)
     (Path(UPLOAD_DIR) / Path(name).name).unlink(missing_ok=True)
+    _update_cache(name, None)
     return {"deleted": name}
 
 
