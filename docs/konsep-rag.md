@@ -296,6 +296,9 @@ Endpoint:
 | GET | `/documents` | Daftar dokumen dan jumlah chunk |
 | DELETE | `/documents/{name}` | Hapus dokumen dari ChromaDB dan disk |
 | POST | `/ask` | `{"question": "...", "top_k": 5}` |
+| GET | `/documents/{name}/suggestions` | 3 saran pertanyaan (cache; `?refresh=true` untuk membuat ulang) |
+| GET | `/suggestions` | Semua saran yang tersimpan |
+| GET | `/stats` | Jumlah chunk/vektor, dimensi, model, konfigurasi |
 
 ## 12. Keterbatasan dan cara memperbaikinya
 

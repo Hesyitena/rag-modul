@@ -1,6 +1,15 @@
 # RAG Modul Kuliah
 
-Chatbot tanya-jawab berbasis PDF modul kuliah. Jawaban hanya diambil dari dokumen yang diupload, lengkap dengan sitasi halaman.
+Chatbot tanya-jawab berbasis PDF modul kuliah. Jawaban hanya diambil dari dokumen yang diupload, lengkap dengan sitasi halaman. Bisa jalan sepenuhnya offline di laptop (pakai Ollama).
+
+Baru kenal RAG, chunk, atau embedding? Baca [`docs/konsep-rag.md`](docs/konsep-rag.md) dulu.
+
+## Fitur
+
+- Upload PDF (klik atau seret), lalu tanya isinya. Jawaban memuat nomor sitasi; klik nomornya untuk melihat kutipan dan halaman sumber.
+- **Saran pertanyaan** otomatis setelah upload, dibuat LLM dari isi PDF. Bisa dibuka lagi kapan saja lewat tombol ⓘ di samping dokumen, dan dibuat ulang lewat "↻ buat ulang".
+- **Panel Indeks** di sidebar: jumlah chunk/vektor, dimensi vektor, model embedding, ukuran chunk, Top-K, dan LLM yang dipakai.
+- Pilihan LLM: Ollama (lokal, gratis) atau Claude API.
 
 ## Alur
 
@@ -9,27 +18,53 @@ UPLOAD:  PDF → ekstrak teks per halaman → chunk (800 char, overlap 150) → 
 TANYA:   pertanyaan → embedding → cari top-5 chunk paling mirip → prompt (konteks + pertanyaan) → LLM → jawaban + sitasi
 ```
 
-| File                    | Isi                                                   |
-| ----------------------- | ----------------------------------------------------- |
-| `app/ingest.py`         | Ekstraksi PDF (pypdf) dan chunking                    |
-| `app/store.py`          | Embedding (`multilingual-e5-small`) + ChromaDB        |
-| `app/llm.py`            | System prompt, susun konteks, panggil Ollama / Claude |
-| `app/main.py`           | Endpoint FastAPI                                      |
-| `app/static/index.html` | UI sederhana                                          |
+| File                    | Isi                                                                     |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `app/config.py`         | Membaca pengaturan dari `.env`                                          |
+| `app/ingest.py`         | Ekstraksi PDF (pypdf) dan chunking                                      |
+| `app/store.py`          | Embedding (`multilingual-e5-small`) + ChromaDB                          |
+| `app/llm.py`            | System prompt, susun konteks, panggil Ollama / Claude, saran pertanyaan |
+| `app/main.py`           | Endpoint FastAPI + cache saran pertanyaan                               |
+| `app/static/index.html` | Antarmuka web (satu file, tanpa build)                                  |
+| `docs/konsep-rag.md`    | Penjelasan konsep RAG, chunk, embedding, ChromaDB                       |
+
+## Prasyarat
+
+- **Python 3.10 atau lebih baru** (`python --version`).
+- **Salah satu LLM:**
+  - **Ollama (lokal, gratis):** install dari [ollama.com](https://ollama.com), lalu `ollama pull qwen2.5:3b`. Kalau RAM pas-pasan, pakai `qwen2.5:1.5b` dan ubah `OLLAMA_MODEL` di `.env`.
+  - **Claude API:** butuh API key dari [console.anthropic.com](https://console.anthropic.com).
+- Ruang disk ± 3 GB untuk dependensi (PyTorch cukup besar) dan model embedding.
 
 ## Setup
 
-```bash
+**Windows (PowerShell):**
+
+```powershell
+git clone https://github.com/Hesyitena/rag-modul.git
+cd rag-modul
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Kalau `Activate.ps1` ditolak dengan pesan *running scripts is disabled*, jalankan sekali `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, lalu aktifkan lagi.
+
+**Linux / macOS:**
+
+```bash
+git clone https://github.com/Hesyitena/rag-modul.git
+cd rag-modul
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-**Pilih LLM:**
+Pastikan prompt terminal menampilkan `(.venv)` sebelum `pip install`, supaya paket tidak masuk ke Python global.
 
-- **Ollama (lokal, gratis):** install dari ollama.com, lalu jalankan `ollama pull qwen2.5:3b`. Kalau RAM pas-pasan, pakai `qwen2.5:1.5b`.
-- **Claude API:** set `LLM_PROVIDER=anthropic` dan `ANTHROPIC_API_KEY` di `.env`.
+**Kalau pakai Claude API:** di `.env`, set `LLM_PROVIDER=anthropic` dan isi `ANTHROPIC_API_KEY`. Jangan commit file `.env` (sudah ada di `.gitignore`).
 
 ## Jalankan
 
@@ -37,20 +72,52 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Buka http://localhost:8000, upload PDF, lalu tanya. Dokumentasi API otomatis ada di http://localhost:8000/docs.
+Buka http://localhost:8000, upload PDF, lalu tanya. Dokumentasi API interaktif ada di http://localhost:8000/docs.
 
-Run pertama akan download model embedding (~120 MB). Setelah itu bisa jalan offline (kalau pakai Ollama).
+Run pertama akan mengunduh model embedding (~120 MB), jadi startup agak lama. Setelah itu bisa jalan offline (kalau pakai Ollama).
+
+## Konfigurasi
+
+Semua pengaturan ada di `.env`. Penjelasan tiap variabel ada di [`docs/konsep-rag.md` bagian 10](docs/konsep-rag.md#10-konfigurasi-env).
+
+> **Penting:** setelah mengubah `CHUNK_SIZE`, `CHUNK_OVERLAP`, atau `EMBED_MODEL`, **upload ulang semua PDF**. Chunk dan vektor yang sudah tersimpan dibuat dengan pengaturan lama dan tidak ikut berubah. Restart server juga diperlukan setiap kali `.env` diubah.
+
+## Lokasi data
+
+Semua data tersimpan lokal di folder `data/` (tidak ikut ke git):
+
+| Path                    | Isi                                     |
+| ----------------------- | --------------------------------------- |
+| `data/uploads/`         | Salinan PDF yang diupload               |
+| `data/chroma/`          | Database vektor ChromaDB                |
+| `data/suggestions.json` | Cache saran pertanyaan per dokumen      |
+
+Untuk mulai dari nol: matikan server, hapus folder `data/`, lalu jalankan lagi.
 
 ## API
 
-| Method | Path                | Body                              |
-| ------ | ------------------- | --------------------------------- |
-| POST   | `/documents`        | form-data `file` (PDF)            |
-| GET    | `/documents`        | –                                 |
-| DELETE | `/documents/{name}` | –                                 |
-| GET    | `/documents/{name}/suggestions` | – (3 saran pertanyaan, dibuat LLM) |
-| GET    | `/stats`            | – (jumlah chunk/vektor, dimensi, model) |
-| POST   | `/ask`              | `{"question": "...", "top_k": 5}` |
+| Method | Path                            | Keterangan                                                                      |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------- |
+| POST   | `/documents`                    | Upload PDF (form-data `file`). Nama sama = menimpa dokumen lama                 |
+| GET    | `/documents`                    | Daftar dokumen dan jumlah chunk                                                 |
+| DELETE | `/documents/{name}`             | Hapus dokumen dari ChromaDB, disk, dan cache saran                              |
+| POST   | `/ask`                          | Body `{"question": "...", "top_k": 5}`. Mengembalikan jawaban + sumber          |
+| GET    | `/documents/{name}/suggestions` | 3 saran pertanyaan. Dari cache kalau ada; `?refresh=true` memaksa LLM membuat ulang |
+| GET    | `/suggestions`                  | Semua saran yang tersimpan, tanpa memanggil LLM                                 |
+| GET    | `/stats`                        | Jumlah chunk/vektor, dimensi, model, dan konfigurasi retrieval                  |
+
+## Troubleshooting
+
+| Gejala                                                          | Penyebab dan solusi                                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `Gagal memanggil LLM: ... No connection could be made` / `Connection refused` | Ollama belum jalan. Buka aplikasi Ollama atau jalankan `ollama serve`                   |
+| `Gagal memanggil LLM: Client error '404 Not Found'`             | Model belum di-pull atau salah nama. Cek `ollama list`, lalu `ollama pull <OLLAMA_MODEL>`             |
+| `Tidak ada teks yang bisa diekstrak` (422)                      | PDF hasil scan (gambar). Perlu OCR dulu, misalnya dengan `ocrmypdf`                                   |
+| Startup pertama lama / terlihat macet                           | Sedang mengunduh model embedding. Tunggu sampai selesai                                               |
+| Peringatan `huggingface_hub ... symlinks` atau `HF_TOKEN`       | Aman diabaikan. Model tetap tersimpan, hanya memakai sedikit lebih banyak ruang disk di Windows       |
+| Ubah `CHUNK_SIZE`/`TOP_K` tapi hasil tidak berubah              | Restart server; untuk `CHUNK_SIZE`/`CHUNK_OVERLAP`, upload ulang PDF juga                             |
+| Jawaban mengarang / tidak sesuai modul                          | Model kecil kurang patuh. Cek sitasi, coba model lebih besar, atau naikkan `TOP_K`                    |
+| `ModuleNotFoundError` saat `uvicorn`                            | venv belum aktif. Aktifkan dulu, lalu jalankan dari folder `rag-modul`                                |
 
 ## Eksperimen lanjutan
 
@@ -66,4 +133,5 @@ Run pertama akan download model embedding (~120 MB). Setelah itu bisa jalan offl
 
 - PDF hasil scan (gambar) tidak bisa diekstrak tanpa OCR.
 - Tabel dan rumus sering berantakan saat diekstrak pypdf.
-- Model 1.5–3B kadang tetap mengarang. Cek sitasinya.
+- Model 1.5–3B kadang tetap mengarang, termasuk di saran pertanyaan. Cek sitasinya.
+- Tiap pertanyaan berdiri sendiri; belum ada riwayat percakapan.
