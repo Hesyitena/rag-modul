@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import llm
+from . import config
 from .config import TOP_K, UPLOAD_DIR
 from .ingest import build_chunks
 from .store import VectorStore
@@ -61,6 +62,32 @@ def upload(file: UploadFile = File(...)):
 @app.get("/documents")
 def list_documents():
     return store.list_documents()
+
+
+@app.get("/documents/{name}/suggestions")
+def suggestions(name: str):
+    passages = store.sample(name)
+    if not passages:
+        raise HTTPException(404, "Dokumen tidak ditemukan.")
+    try:
+        return {"questions": llm.suggest(passages)}
+    except Exception as e:
+        raise HTTPException(502, f"Gagal memanggil LLM: {e}")
+
+
+@app.get("/stats")
+def stats():
+    llm_model = config.ANTHROPIC_MODEL if config.LLM_PROVIDER == "anthropic" else config.OLLAMA_MODEL
+    return {
+        "documents": len(store.list_documents()),
+        "vectors": store.col.count(),
+        "dim": store.dim,
+        "embed_model": config.EMBED_MODEL.split("/")[-1],
+        "chunk_size": config.CHUNK_SIZE,
+        "chunk_overlap": config.CHUNK_OVERLAP,
+        "top_k": config.TOP_K,
+        "llm": f"{config.LLM_PROVIDER} · {llm_model}",
+    }
 
 
 @app.delete("/documents/{name}")

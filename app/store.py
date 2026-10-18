@@ -15,6 +15,7 @@ class VectorStore:
         )
         # Download model sekali (~120 MB), setelah itu jalan offline.
         self.model = SentenceTransformer(EMBED_MODEL)
+        self.dim = len(self._embed(["x"], "")[0])  # jumlah angka per vektor
 
     def _embed(self, texts: list[str], prefix: str) -> list[list[float]]:
         vecs = self.model.encode(
@@ -62,6 +63,12 @@ class VectorStore:
         for m in metas:
             counts[m["source"]] = counts.get(m["source"], 0) + 1
         return [{"name": k, "chunks": v} for k, v in sorted(counts.items())]
+
+    def sample(self, doc_name: str, n: int = 6) -> list[str]:
+        """Ambil n chunk yang tersebar dari awal sampai akhir dokumen."""
+        docs = self.col.get(where={"source": doc_name}, include=["documents"])["documents"]
+        step = max(1, len(docs) // n)
+        return docs[::step][:n]
 
     def delete_document(self, doc_name: str) -> None:
         self.col.delete(where={"source": doc_name})

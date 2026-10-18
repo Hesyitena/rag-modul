@@ -48,6 +48,8 @@ Run pertama akan download model embedding (~120 MB). Setelah itu bisa jalan offl
 | POST   | `/documents`        | form-data `file` (PDF)            |
 | GET    | `/documents`        | –                                 |
 | DELETE | `/documents/{name}` | –                                 |
+| GET    | `/documents/{name}/suggestions` | – (3 saran pertanyaan, dibuat LLM) |
+| GET    | `/stats`            | – (jumlah chunk/vektor, dimensi, model) |
 | POST   | `/ask`              | `{"question": "...", "top_k": 5}` |
 
 ## Eksperimen lanjutan
