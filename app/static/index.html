@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Modul Kuliah</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#667085; --line:#e4e7ec; --acc:#2f6fed; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#171b23; --text:#e6e8ec; --muted:#98a2b3; --line:#2a303b; --acc:#6c9bff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:860px; margin:0 auto; padding:24px 16px; display:grid; gap:16px; }
+  h1 { font-size:20px; margin:0; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font:inherit; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); padding:2px 8px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  textarea { width:100%; min-height:70px; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); font:inherit; resize:vertical; }
+  ul { list-style:none; padding:0; margin:8px 0 0; }
+  li { display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-top:1px solid var(--line); }
+  .muted { color:var(--muted); font-size:13px; }
+  #answer { white-space:pre-wrap; }
+  details { border-top:1px solid var(--line); padding:6px 0; }
+  summary { cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>RAG Modul Kuliah</h1>
+
+  <section class="card">
+    <div class="row">
+      <input type="file" id="file" accept="application/pdf">
+      <button id="uploadBtn">Upload</button>
+      <span id="uploadStatus" class="muted"></span>
+    </div>
+    <ul id="docs"></ul>
+  </section>
+
+  <section class="card">
+    <textarea id="q" placeholder="Tanya isi modul, misal: apa beda normalisasi 2NF dan 3NF?"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="askBtn">Tanya</button>
+      <span id="askStatus" class="muted"></span>
+    </div>
+  </section>
+
+  <section class="card" id="result" hidden>
+    <div id="answer"></div>
+    <div id="sources" style="margin-top:12px"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+async function loadDocs() {
+  const docs = await api("/documents");
+  $("docs").innerHTML = docs.length ? "" : '<li class="muted">Belum ada dokumen.</li>';
+  for (const d of docs) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${d.name} <span class="muted">· ${d.chunks} chunk</span></span>`;
+    const del = document.createElement("button");
+    del.className = "ghost"; del.textContent = "hapus";
+    del.onclick = async () => { await api(`/documents/${encodeURIComponent(d.name)}`, { method: "DELETE" }); loadDocs(); };
+    li.append(del);
+    $("docs").append(li);
+  }
+}
+
+$("uploadBtn").onclick = async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  $("uploadBtn").disabled = true; $("uploadStatus").textContent = "Memproses...";
+  try {
+    const r = await api("/documents", { method: "POST", body: fd });
+    $("uploadStatus").textContent = `${r.pages} halaman, ${r.chunks} chunk`;
+    loadDocs();
+  } catch (e) { $("uploadStatus").textContent = "Gagal: " + e.message; }
+  $("uploadBtn").disabled = false;
+};
+
+$("askBtn").onclick = async () => {
+  const question = $("q").value.trim();
+  if (!question) return;
+  $("askBtn").disabled = true; $("askStatus").textContent = "Mikir...";
+  try {
+    const r = await api("/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    $("result").hidden = false;
+    $("answer").textContent = r.answer;
+    $("sources").innerHTML = "";
+    for (const s of r.sources) {
+      const d = document.createElement("details");
+      d.innerHTML = `<summary>[${s.n}] ${s.source}, hlm ${s.page} <span class="muted">· skor ${s.score}</span></summary><p class="muted"></p>`;
+      d.querySelector("p").textContent = s.snippet + "…";
+      $("sources").append(d);
+    }
+    $("askStatus").textContent = "";
+  } catch (e) { $("askStatus").textContent = "Gagal: " + e.message; }
+  $("askBtn").disabled = false;
+};
+
+$("q").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("askBtn").click(); });
+loadDocs();
+</script>
+</body>
+</html>
